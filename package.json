@@ -1,0 +1,14 @@
+{
+  "name": "zippy-local",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Linux-capable local Zippy runtime",
+  "scripts": {
+    "start": "node linux/server.js",
+    "start:linux": "node linux/server.js",
+    "test:triggers": "node linux/tests/trigger-normalization.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
