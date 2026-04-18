@@ -1,26 +1,26 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Zippy Linux</title>
+    <title>Domovik Linux</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="shell">
       <section class="hero">
-        <p class="eyebrow">zippy for ubuntu</p>
-        <h1>Lokaler Linux-Port mit Browser-UI, Screenshot, Sprache und CLI-Handoffs.</h1>
+        <p class="eyebrow">Domovik for ubuntu</p>
+        <h1>Domovik for Linux with browser UI, screenshots, voice, and CLI handoffs.</h1>
         <p class="lede">
-          Diese Version ersetzt die Windows-Overlay-App durch eine lokale Web-Oberfläche auf deinem Rechner.
-          Die KI-Aufrufe laufen direkt mit deinen eigenen Keys aus <code>linux/.env</code>.
+          This version replaces the Windows overlay app with a local web interface on your machine.
+          AI requests run directly with your own keys from <code>linux/.env</code>.
         </p>
       </section>
 
       <section class="panel status-panel">
         <div class="panel-header">
           <h2>Status</h2>
-          <button id="refresh-status" class="ghost-button">neu laden</button>
+          <button id="refresh-status" class="ghost-button">refresh</button>
         </div>
         <div id="status-grid" class="status-grid"></div>
       </section>
@@ -29,30 +29,30 @@
         <div class="column">
           <section class="panel">
             <div class="panel-header">
-              <h2>Eingabe</h2>
+              <h2>Input</h2>
             </div>
             <label class="field">
               <span>Prompt</span>
-              <textarea id="prompt" rows="8" placeholder="nimm codex ..., use codex ..., запусти codex ..."></textarea>
+              <textarea id="prompt" rows="8" placeholder="use codex ..., use claude code ..., run openclaw ..."></textarea>
             </label>
             <div class="controls">
-              <button id="capture-screen" class="primary-button">screen aufnehmen</button>
-              <label class="upload-button" for="image-upload">bild laden</label>
+              <button id="capture-screen" class="primary-button">capture screen</button>
+              <label class="upload-button" for="image-upload">upload image</label>
               <input id="image-upload" type="file" accept="image/*" hidden />
-              <button id="clear-screen" class="ghost-button">screen löschen</button>
+              <button id="clear-screen" class="ghost-button">clear screen</button>
             </div>
             <div class="controls">
-              <button id="start-recording" class="primary-button">aufnahme starten</button>
-              <button id="stop-recording" class="ghost-button" disabled>aufnahme stoppen</button>
+              <button id="start-recording" class="primary-button">start recording</button>
+              <button id="stop-recording" class="ghost-button" disabled>stop recording</button>
             </div>
             <div class="toggle-row">
-              <label><input id="use-conversation" type="checkbox" checked /> Verlauf mitsenden</label>
-              <label><input id="speak-response" type="checkbox" checked /> Antwort sprechen</label>
+              <label><input id="use-conversation" type="checkbox" checked /> Include conversation history</label>
+              <label><input id="speak-response" type="checkbox" checked /> Speak reply</label>
             </div>
-            <div id="capture-preview" class="capture-preview empty">kein screenshot ausgewählt</div>
+            <div id="capture-preview" class="capture-preview empty">no screenshot selected</div>
             <div class="submit-row">
-              <button id="ask-button" class="primary-button large-button">zippy fragen</button>
-              <span id="activity" class="activity">bereit</span>
+              <button id="ask-button" class="primary-button large-button">ask Domovik</button>
+              <span id="activity" class="activity">ready</span>
             </div>
           </section>
         </div>
@@ -60,17 +60,17 @@
         <div class="column">
           <section class="panel">
             <div class="panel-header">
-              <h2>Antwort</h2>
-              <button id="clear-history" class="ghost-button">verlauf löschen</button>
+              <h2>Response</h2>
+              <button id="clear-history" class="ghost-button">clear history</button>
             </div>
-            <pre id="response" class="response-box">noch keine antwort</pre>
+            <pre id="response" class="response-box">no response yet</pre>
           </section>
 
           <section class="panel">
             <div class="panel-header">
-              <h2>Verlauf</h2>
+              <h2>History</h2>
             </div>
-            <div id="history" class="history-list empty">noch keine unterhaltung</div>
+            <div id="history" class="history-list empty">no conversation yet</div>
           </section>
         </div>
       </section>

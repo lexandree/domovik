@@ -1,12 +1,17 @@
-# Zippy Linux - Agent Instructions
+# Domovik - Agent Instructions
 
 `CLAUDE.md` points to this file.
 
 ## Overview
 
-This repository is the standalone Linux port of Zippy.
+This repository is the standalone Linux port of the Domovik local desktop companion project.
 
-The app is a local Node.js + browser runtime that:
+The repository now consists of:
+
+- a `core runtime` in Node.js
+- an emerging native Linux shell in Python/Qt
+
+The current runtime:
 
 - reads API secrets from `linux/.env`
 - serves a local browser UI from `linux/public/`
@@ -23,6 +28,19 @@ The app is a local Node.js + browser runtime that:
 - writes run logs to `codex output/`
 - stores non-secret local temp state in `linux/data/`
 
+The native Linux shell scaffold:
+
+- lives in `linux/qt_shell/`
+- is built with Python and PySide6
+- owns tray, overlay, runtime bridge, and future desktop-native behaviours
+- should absorb native Linux integration concerns instead of pushing them into the browser UI
+
+The repository also contains a GNOME-specific shortcut adapter:
+
+- `linux/gnome_extension/`
+- used only for GNOME Shell integration where a desktop-specific trigger layer is needed
+- should remain a thin adapter over the Qt shell, not a second runtime
+
 ## Key Files
 
 | File | Purpose |
@@ -31,6 +49,12 @@ The app is a local Node.js + browser runtime that:
 | `linux/public/index.html` | Main browser UI. |
 | `linux/public/app.js` | Browser-side screenshot capture, microphone recording, chat requests, and response playback. |
 | `linux/public/styles.css` | Linux UI styling. |
+| `linux/qt_shell/app.py` | Native Qt shell entry point. |
+| `linux/qt_shell/tray.py` | Tray icon controller for the native shell. |
+| `linux/qt_shell/overlay.py` | Transparent overlay companion window scaffold. |
+| `linux/qt_shell/bridge.py` | Runtime bridge from Qt shell to the Node runtime. |
+| `linux/gnome_extension/` | GNOME Shell extension scaffold for GNOME-specific shortcut integration. |
+| `requirements-desktop.txt` | Python dependencies for the native shell. |
 | `linux/.env.example` | Template for local API secrets and command paths. |
 | `linux/README.md` | Linux runtime setup notes. |
 | `README.md` | English project overview for the standalone Linux port. |
@@ -49,6 +73,15 @@ npm run start:linux
 
 Then open `http://127.0.0.1:3000`.
 
+Planned native shell launch:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-desktop.txt
+python3 -m linux.qt_shell.app
+```
+
 ## Conventions
 
 - Keep the repo focused on the Linux local web app only.
@@ -61,6 +94,8 @@ Then open `http://127.0.0.1:3000`.
 - Preserve German trigger phrases unless the user asks to change them.
 - Keep English and Russian trigger support aligned with the shared normalization layer in `linux/server.js`.
 - Treat `specs/` as the source of truth for product scope and architecture direction when the project grows.
+- Keep native Linux desktop integration work in `linux/qt_shell/` unless there is a clear reason to move it elsewhere.
+- GNOME Shell extension code belongs in `linux/gnome_extension/` and should stay a thin trigger adapter over the Qt shell.
 
 ## Verification
 

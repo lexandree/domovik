@@ -6,7 +6,7 @@ Draft
 
 ## Decision Shape
 
-Zippy should be split into two layers:
+Domovik should be split into two layers:
 
 1. `core runtime`
 2. `linux desktop shell`
@@ -43,4 +43,3 @@ Zippy should be split into two layers:
 ## Consequence
 
 The current browser UI should be treated as a temporary debug surface, not the final Linux shell.
-

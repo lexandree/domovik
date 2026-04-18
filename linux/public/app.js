@@ -17,11 +17,14 @@ const imageUploadElement = document.querySelector("#image-upload");
 const audioPlayerElement = document.querySelector("#player");
 const startRecordingButton = document.querySelector("#start-recording");
 const stopRecordingButton = document.querySelector("#stop-recording");
+const maxScreenshotEdge = 2000;
+const screenshotJpegQuality = 0.82;
+const defaultAssistantName = "Domovik";
 
 document.querySelector("#refresh-status").addEventListener("click", loadStatus);
 document.querySelector("#capture-screen").addEventListener("click", captureScreen);
 document.querySelector("#clear-screen").addEventListener("click", clearScreenshot);
-document.querySelector("#ask-button").addEventListener("click", askZippy);
+document.querySelector("#ask-button").addEventListener("click", askAssistant);
 document.querySelector("#clear-history").addEventListener("click", clearConversationHistory);
 document.querySelector("#start-recording").addEventListener("click", startRecording);
 document.querySelector("#stop-recording").addEventListener("click", stopRecording);
@@ -31,29 +34,67 @@ loadStatus();
 renderHistory();
 
 async function loadStatus() {
-  setActivity("lade status");
+  setActivity("loading status");
   try {
     const response = await fetch("/api/status");
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error || "Status konnte nicht geladen werden.");
+      throw new Error(payload.error || "Could not load status.");
     }
 
+    applyAssistantIdentity(payload);
+
     statusGridElement.innerHTML = "";
-    appendStatusCard("Env-Datei", payload.envFilePath);
+    appendStatusCard("Assistant", payload.assistantName || defaultAssistantName);
+    appendStatusCard("Env file", payload.envFilePath);
     appendStatusCard("Port", String(payload.port));
-    appendStatusCard("Anthropic", payload.anthropicConfigured ? `ok · ${payload.anthropicModel}` : "fehlt");
-    appendStatusCard("ElevenLabs", payload.elevenLabsConfigured ? "ok" : "fehlt");
-    appendStatusCard("Voice ID", payload.elevenLabsVoiceConfigured ? "ok" : "fehlt");
+    appendStatusCard("Text", `${payload.textProvider || "unknown"}`);
+    appendStatusCard("Vision", `${payload.visionProvider || "unknown"}`);
+    appendStatusCard(
+      "Text backend",
+      payload.textProvider === "minimax"
+        ? (payload.miniMaxTextConfigured
+            ? `ok · ${payload.miniMaxTextModel}`
+            : "missing")
+        : "shared with vision"
+    );
+    appendStatusCard(
+      "Vision backend",
+      payload.visionProvider === "openai_compat"
+        ? (payload.openAiCompatibleConfigured
+            ? `ok · ${payload.openAiCompatibleModel}`
+            : "missing")
+        : (payload.anthropicConfigured
+            ? `ok · ${payload.anthropicModel}`
+            : "missing")
+    );
+    appendStatusCard("TTS", payload.textToSpeechProvider || "unknown");
+    appendStatusCard("ElevenLabs", payload.elevenLabsConfigured ? "ok" : "missing");
+    appendStatusCard("Voice ID", payload.elevenLabsVoiceConfigured ? "ok" : "missing");
     appendStatusCard("STT", payload.speechToTextProvider);
     appendStatusCard("Codex", payload.codexCommand);
     appendStatusCard("Claude Code", payload.claudeCodeCommand);
     appendStatusCard("OpenClaw", payload.openClawCommand);
     appendStatusCard("Workdir", payload.codexWorkingDirectory);
     appendStatusCard("Logs", payload.codexOutputDirectory);
-    setActivity("bereit");
+    setActivity("ready");
   } catch (error) {
     setActivity(error.message);
+  }
+}
+
+function applyAssistantIdentity(payload) {
+  const assistantName = (payload.assistantName || defaultAssistantName).trim() || defaultAssistantName;
+  document.title = `${assistantName} Linux`;
+
+  const eyebrowElement = document.querySelector(".eyebrow");
+  if (eyebrowElement) {
+    eyebrowElement.textContent = `${assistantName} for ubuntu`;
+  }
+
+  const askButton = document.querySelector("#ask-button");
+  if (askButton) {
+    askButton.textContent = `ask ${assistantName}`;
   }
 }
 
@@ -65,7 +106,7 @@ function appendStatusCard(label, value) {
 }
 
 async function captureScreen() {
-  setActivity("warte auf screen-freigabe");
+  setActivity("waiting for screen share");
   try {
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: 1 },
@@ -78,19 +119,20 @@ async function captureScreen() {
     video.muted = true;
     await video.play();
 
+    const { width, height } = fitWithinMaxEdge(video.videoWidth, video.videoHeight, maxScreenshotEdge);
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = width;
+    canvas.height = height;
     const context = canvas.getContext("2d");
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    state.screenshotDataUrl = canvas.toDataURL("image/jpeg", 0.92);
+    state.screenshotDataUrl = canvas.toDataURL("image/jpeg", screenshotJpegQuality);
 
     video.pause();
     stream.getTracks().forEach((track) => track.stop());
     renderScreenshotPreview();
-    setActivity("screen gespeichert");
+    setActivity("screen captured");
   } catch (error) {
-    setActivity(`screen fehlgeschlagen: ${error.message}`);
+    setActivity(`screen failed: ${error.message}`);
   }
 }
 
@@ -98,7 +140,7 @@ function clearScreenshot() {
   state.screenshotDataUrl = "";
   imageUploadElement.value = "";
   renderScreenshotPreview();
-  setActivity("screen entfernt");
+  setActivity("screen cleared");
 }
 
 function handleImageUpload(event) {
@@ -108,10 +150,14 @@ function handleImageUpload(event) {
   }
 
   const reader = new FileReader();
-  reader.onload = () => {
-    state.screenshotDataUrl = reader.result;
-    renderScreenshotPreview();
-    setActivity("bild geladen");
+  reader.onload = async () => {
+    try {
+      state.screenshotDataUrl = await downscaleImageDataUrl(String(reader.result || ""));
+      renderScreenshotPreview();
+      setActivity("image loaded");
+    } catch (error) {
+      setActivity(`image failed: ${error.message}`);
+    }
   };
   reader.readAsDataURL(file);
 }
@@ -119,16 +165,16 @@ function handleImageUpload(event) {
 function renderScreenshotPreview() {
   if (!state.screenshotDataUrl) {
     capturePreviewElement.className = "capture-preview empty";
-    capturePreviewElement.textContent = "kein screenshot ausgewählt";
+    capturePreviewElement.textContent = "no screenshot selected";
     return;
   }
 
   capturePreviewElement.className = "capture-preview";
-  capturePreviewElement.innerHTML = `<img src="${state.screenshotDataUrl}" alt="Screenshot-Vorschau" />`;
+  capturePreviewElement.innerHTML = `<img src="${state.screenshotDataUrl}" alt="Screenshot preview" />`;
 }
 
 async function startRecording() {
-  setActivity("mikrofon anfragen");
+  setActivity("requesting microphone");
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.recordedChunks = [];
@@ -151,9 +197,9 @@ async function startRecording() {
     state.mediaRecorder.start();
     startRecordingButton.disabled = true;
     stopRecordingButton.disabled = false;
-    setActivity("aufnahme läuft");
+    setActivity("recording");
   } catch (error) {
-    setActivity(`aufnahme fehlgeschlagen: ${error.message}`);
+    setActivity(`recording failed: ${error.message}`);
   }
 }
 
@@ -165,7 +211,7 @@ function stopRecording() {
   state.mediaRecorder.stop();
   startRecordingButton.disabled = false;
   stopRecordingButton.disabled = true;
-  setActivity("transkribiere");
+  setActivity("transcribing");
 }
 
 async function transcribeRecording(blob) {
@@ -176,21 +222,21 @@ async function transcribeRecording(blob) {
       mimeType: blob.type || "audio/webm"
     });
     promptElement.value = payload.transcript || "";
-    setActivity("transkript übernommen");
+    setActivity(`transcript inserted · ${formatTimingSummary(payload.timings)}`);
   } catch (error) {
-    setActivity(`transkript fehlgeschlagen: ${error.message}`);
+    setActivity(`transcript failed: ${error.message}`);
   }
 }
 
-async function askZippy() {
+async function askAssistant() {
   const prompt = promptElement.value.trim();
   if (!prompt) {
-    setActivity("bitte erst einen prompt eingeben");
+    setActivity("enter a prompt first");
     return;
   }
 
-  setActivity("frage zippy");
-  responseElement.textContent = "arbeite …";
+  setActivity("asking Domovik");
+  responseElement.textContent = "working …";
 
   try {
     const payload = await postJson("/api/chat", {
@@ -199,9 +245,14 @@ async function askZippy() {
       conversationHistory: useConversationElement.checked ? state.conversationHistory : []
     });
 
-    responseElement.textContent = payload.reply || "keine antwort";
+    responseElement.textContent = payload.reply || "no reply";
 
-    if (payload.mode === "anthropic" || payload.mode === "openclaw") {
+    if (
+      payload.mode === "anthropic" ||
+      payload.mode === "openai_compat" ||
+      payload.mode === "minimax" ||
+      payload.mode === "openclaw"
+    ) {
       state.conversationHistory.push({
         user: prompt,
         assistant: payload.reply || ""
@@ -211,9 +262,9 @@ async function askZippy() {
     }
 
     if (payload.outputFilePath) {
-      setActivity(`fertig · log: ${payload.outputFilePath}`);
+      setActivity(`done · ${formatTimingSummary(payload.timings)} · log: ${payload.outputFilePath}`);
     } else {
-      setActivity("fertig");
+      setActivity(`done · ${formatTimingSummary(payload.timings)}`);
     }
 
     if (speakResponseElement.checked && payload.reply) {
@@ -221,7 +272,7 @@ async function askZippy() {
     }
   } catch (error) {
     responseElement.textContent = error.message;
-    setActivity(`fehler: ${error.message}`);
+    setActivity(`error: ${error.message}`);
   }
 }
 
@@ -237,13 +288,13 @@ async function playSpeech(text) {
 function clearConversationHistory() {
   state.conversationHistory = [];
   renderHistory();
-  setActivity("verlauf gelöscht");
+  setActivity("history cleared");
 }
 
 function renderHistory() {
   if (!state.conversationHistory.length) {
     historyElement.className = "history-list empty";
-    historyElement.textContent = "noch keine unterhaltung";
+    historyElement.textContent = "no conversation yet";
     return;
   }
 
@@ -252,8 +303,8 @@ function renderHistory() {
     .map(
       (entry) => `
         <article class="history-entry">
-          <p><strong>du</strong><span>${escapeHtml(entry.user)}</span></p>
-          <p><strong>zippy</strong><span>${escapeHtml(entry.assistant)}</span></p>
+          <p><strong>you</strong><span>${escapeHtml(entry.user)}</span></p>
+          <p><strong>${escapeHtml(defaultAssistantName)}</strong><span>${escapeHtml(entry.assistant)}</span></p>
         </article>
       `
     )
@@ -270,7 +321,7 @@ async function postJson(url, body) {
   });
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(payload.error || "Anfrage fehlgeschlagen.");
+    throw new Error(payload.error || "Request failed.");
   }
   return payload;
 }
@@ -286,6 +337,77 @@ function blobToDataUrl(blob) {
 
 function setActivity(message) {
   activityElement.textContent = message;
+}
+
+function formatTimingSummary(timings) {
+  if (!timings || typeof timings !== "object") {
+    return "timing unavailable";
+  }
+
+  const parts = [];
+  if (Number.isFinite(timings.providerMs)) {
+    parts.push(`provider ${formatMilliseconds(timings.providerMs)}`);
+  }
+  if (Number.isFinite(timings.totalMs)) {
+    parts.push(`total ${formatMilliseconds(timings.totalMs)}`);
+  }
+  return parts.length ? parts.join(" · ") : "timing unavailable";
+}
+
+function formatMilliseconds(value) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds)) {
+    return "n/a";
+  }
+  if (milliseconds >= 1000) {
+    return `${(milliseconds / 1000).toFixed(2)}s`;
+  }
+  return `${Math.round(milliseconds)}ms`;
+}
+
+function fitWithinMaxEdge(sourceWidth, sourceHeight, maxEdge) {
+  if (!sourceWidth || !sourceHeight) {
+    return { width: sourceWidth, height: sourceHeight };
+  }
+
+  if (!maxEdge || maxEdge <= 0) {
+    return { width: sourceWidth, height: sourceHeight };
+  }
+
+  const largestEdge = Math.max(sourceWidth, sourceHeight);
+  if (largestEdge <= maxEdge) {
+    return { width: sourceWidth, height: sourceHeight };
+  }
+
+  const scale = maxEdge / largestEdge;
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale))
+  };
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("could not load image"));
+    image.src = dataUrl;
+  });
+}
+
+async function downscaleImageDataUrl(dataUrl) {
+  if (!dataUrl.startsWith("data:image/")) {
+    return dataUrl;
+  }
+
+  const image = await loadImage(dataUrl);
+  const { width, height } = fitWithinMaxEdge(image.width, image.height, maxScreenshotEdge);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", screenshotJpegQuality);
 }
 
 function escapeHtml(value) {

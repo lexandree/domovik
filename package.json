@@ -1,8 +1,8 @@
 {
-  "name": "zippy-local",
+  "name": "domovik",
   "version": "0.1.0",
   "private": true,
-  "description": "Linux-capable local Zippy runtime",
+  "description": "A local-first Linux desktop companion with vision, voice, and agentic tool handoffs.",
   "scripts": {
     "start": "node linux/server.js",
     "start:linux": "node linux/server.js",

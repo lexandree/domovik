@@ -1,0 +1,7 @@
+{
+  "uuid": "assistant-ptt@local",
+  "name": "Assistant Push-to-Talk",
+  "description": "Toggle native push-to-talk in the local Assistant Qt shell.",
+  "shell-version": ["46"],
+  "url": "https://example.invalid/assistant-linux"
+}

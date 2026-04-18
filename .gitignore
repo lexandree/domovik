@@ -2,4 +2,11 @@ linux/.env
 linux/data/
 codex output/
 playground/
-
+.venv/
+.venv-qt/
+.specify/init-options.json
+notebooks/*.log
+__pycache__/
+*.pyc
+clicky-upstream/
+zippy-windows/

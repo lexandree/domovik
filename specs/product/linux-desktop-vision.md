@@ -6,7 +6,7 @@ Draft
 
 ## Goal
 
-Turn Zippy into a Linux desktop assistant that recovers the defining native behaviours of the original macOS and Windows apps:
+Turn Domovik into a Linux desktop assistant that recovers the defining native behaviours of the original macOS and Windows apps:
 
 - tray-resident app
 - always-available companion near the cursor
@@ -44,4 +44,3 @@ Turn Zippy into a Linux desktop assistant that recovers the defining native beha
 - global push-to-talk
 - current Anthropic / ElevenLabs / Whisper / CLI integration preserved
 - current `.env` and local logging model preserved
-

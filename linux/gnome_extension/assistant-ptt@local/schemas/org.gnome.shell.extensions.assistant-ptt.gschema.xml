@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.assistant-ptt" path="/org/gnome/shell/extensions/assistant-ptt/">
+    <key name="push-to-talk-shortcut" type="as">
+      <default><![CDATA[['F8']]]></default>
+      <summary>Shortcut used to toggle push-to-talk</summary>
+      <description>
+        The GNOME Shell accelerator that toggles native push-to-talk in the local Domovik Qt shell.
+      </description>
+    </key>
+  </schema>
+</schemalist>

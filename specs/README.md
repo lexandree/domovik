@@ -1,6 +1,6 @@
 # Specs
 
-This directory is the source of truth for product and architecture decisions as Zippy grows from a small local tool into a larger Linux desktop assistant.
+This directory is the source of truth for product and architecture decisions as Domovik grows from a small local tool into a larger Linux desktop assistant.
 
 ## Workflow
 
@@ -18,7 +18,9 @@ This directory is the source of truth for product and architecture decisions as 
 
 ## Current Active Specs
 
+- [`003-agentic-vision-runtime/spec.md`](003-agentic-vision-runtime/spec.md) - active
+- [`001-qt-linux-shell/spec.md`](001-qt-linux-shell/spec.md) - baseline implemented
+- [`002-global-push-to-talk/spec.md`](002-global-push-to-talk/spec.md) - in progress
 - [`product/linux-desktop-vision.md`](product/linux-desktop-vision.md)
 - [`architecture/runtime-split.md`](architecture/runtime-split.md)
 - [`adr/0001-linux-shell-evaluation.md`](adr/0001-linux-shell-evaluation.md)
-

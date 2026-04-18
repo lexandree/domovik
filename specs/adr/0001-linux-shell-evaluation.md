@@ -6,7 +6,7 @@ Proposed
 
 ## Context
 
-Zippy currently has a working local Node runtime and browser UI. The next step is to recover original desktop behaviours on Linux:
+Domovik currently has a working local Node runtime and browser UI. The next step is to recover original desktop behaviours on Linux:
 
 - tray icon
 - transparent overlay
@@ -118,4 +118,3 @@ This decision is intentionally not final. The next concrete step should be a sho
 - screenshot capture
 
 on the actual target Linux desktop environment.
-
