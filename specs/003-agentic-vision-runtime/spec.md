@@ -5,6 +5,36 @@
 **Status**: Active  
 **Input**: User description: "Formalize the next runtime milestone around chat history, clean reply handling, split text and vision backends, an optional agentic visual re-check mode, and ROI/CV-assisted screen analysis."
 
+## Product Value
+
+Domovik is not just a chat interface with screenshots. Its core value is a desktop-native **point-and-ask** workflow:
+
+- the user points at something on screen
+- the user asks by voice or text what they want to know or do
+- Domovik helps in the context of that exact on-screen target without requiring manual copy/paste into other tools
+
+The assistant's functional value comes from helping *in place*:
+
+- point at an error and ask for the cause
+- point at a warning or dialog and ask what it means
+- point at a text fragment in any app and ask for source, clarification, translation, pronunciation, or summary
+- point at a UI region and ask what to click or why it is blocked
+
+This feature should preserve that product direction by treating screenshot context, ROI, voice interaction, and search as parts of one contextual desktop-help workflow rather than as separate disconnected capabilities.
+
+## Primary User Intents
+
+Domovik should explicitly support these first-class intent families in contextual desktop use:
+
+- `explain`
+- `find cause`
+- `find source`
+- `verify`
+- `translate`
+- `pronounce`
+- `summarize`
+- `search more`
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Clean conversational history (Priority: P1)
@@ -53,6 +83,8 @@ As a user who is not satisfied with the first screenshot answer, I want an optio
 2. **Given** agentic visual mode is enabled, **When** the text orchestrator needs more grounded detail, **Then** it may issue a bounded number of targeted screen-inspection subqueries to the VLM.
 3. **Given** the agentic loop reaches its configured step limit, **When** it still has uncertainty, **Then** the final answer explicitly reports uncertainty instead of pretending confidence.
 
+Direct screenshot-aware mode and agentic screenshot-aware mode are both required interaction paths for this feature. The optional part is which path the user chooses per turn, not whether the runtime implements the agentic path at all.
+
 ---
 
 ### User Story 4 - ROI and CV-assisted inspection (Priority: P2)
@@ -85,6 +117,22 @@ As a user, I want the assistant to make it clear whether the current turn is pla
 2. **Given** the runtime has multiple interaction modes, **When** a response is shown, **Then** the user can tell which mode produced it.
 3. **Given** the user starts a fresh conversation, **When** they trigger a new chat or clear history, **Then** old turns and stale screenshot context are not silently reused.
 
+---
+
+### User Story 6 - Built-in web search capability (Priority: P2)
+
+As a user, I want the assistant to search the web directly when needed so I do not have to manually move my query into a separate search tool.
+
+**Why this priority**: Search is one of the highest-value assistant tools and does not require the full MCP discussion before adding practical value.
+
+**Independent Test**: Send a prompt that explicitly requests web search, verify that the runtime performs a real web lookup, and confirm the final answer is grounded in returned search results rather than a generic model-only response.
+
+**Acceptance Scenarios**:
+
+1. **Given** the runtime exposes internal search capabilities, **When** the user requests web search, **Then** the runtime uses the `searchWeb` path and returns a grounded response based on returned results.
+2. **Given** the broader internal search interface also includes `searchDocs` and `searchLocal`, **When** this milestone is implemented, **Then** only `searchWeb` is required to be functional while the other interfaces may remain reserved for later features.
+3. **Given** web search is unavailable or fails, **When** the assistant handles the request, **Then** it returns an actionable failure message rather than pretending a search result exists.
+
 ## Edge Cases
 
 - What happens when the text backend is available but the vision backend times out or returns malformed output?
@@ -110,13 +158,18 @@ As a user, I want the assistant to make it clear whether the current turn is pla
 - **FR-009**: The agentic visual mode MUST enforce explicit loop limits for step count, repeated failures, and total runtime budget.
 - **FR-010**: The system MUST preserve the currently captured screenshot context for a bounded follow-up window so a re-check mode can reuse it without forcing immediate recapture.
 - **FR-011**: The system MUST support clearing screenshot context independently from clearing chat history.
-- **FR-012**: The system MUST support manual ROI selection as an additional image context for the current turn or visual session.
+- **FR-012**: The system MUST support manual ROI selection as an additional image context for the current turn or visual session, with the first implementation slice shipping a real manual ROI flow in at least one UI surface.
 - **FR-013**: The architecture SHOULD support optional CV-assisted preprocessing such as OCR, region proposals, saliency cues, or anomaly hints without making those steps mandatory for every turn.
 - **FR-014**: When ROI data is present, the runtime MUST preserve the full-frame image and MUST NOT replace it entirely with the crop.
 - **FR-015**: The runtime SHOULD allow a two-stage path where the vision backend produces grounded visual observations and a stronger text backend produces the final user-facing answer.
 - **FR-016**: The system MUST expose enough runtime status for the user to see which text provider, vision provider, and interaction mode are active.
 - **FR-017**: The system MUST keep assistant identity, provider disclosure, and training-cutoff disclosure consistent across direct and agentic modes.
 - **FR-018**: The system MUST avoid replaying stale screenshots or ROI artifacts into a new conversation after the user explicitly resets state.
+- **FR-019**: The agentic visual mode MUST use a dedicated orchestrator system prompt separate from the default assistant reply prompt so the reasoning layer can behave as a bounded tool-using controller rather than a plain conversational assistant.
+- **FR-020**: The runtime MUST define an internal search capability interface that includes `performSearch(query, options)`, `searchWeb(query)`, `searchDocs(query)`, and `searchLocal(query)` as stable internal concepts, even if only a subset is implemented in this milestone.
+- **FR-021**: This milestone MUST implement `searchWeb(query)` as the first working search capability without requiring MCP as the invocation layer, using Tavily as the web search backend.
+- **FR-022**: The runtime MUST be able to return grounded failure messaging when web search fails or is unavailable.
+- **FR-023**: The internal search capability interface MUST be designed so it can later be wrapped or exported through MCP without changing the core fast path used by the runtime in this milestone.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -138,6 +191,7 @@ As a user, I want the assistant to make it clear whether the current turn is pla
 - **SC-004**: A screenshot-aware prompt returns a graceful fallback message rather than a raw backend transport failure when the vision backend is unavailable.
 - **SC-005**: In agentic visual mode, the runtime completes within a bounded step budget and can return either a revised answer or an explicit uncertainty report.
 - **SC-006**: When ROI mode is used on a dense image, the runtime can reason over both the global frame and the detailed crop without losing full-scene context.
+- **SC-007**: A user can explicitly request web search and receive a grounded answer based on Tavily-returned search results without leaving the assistant.
 
 ## Assumptions
 
