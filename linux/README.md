@@ -50,18 +50,52 @@ The current Sherpa-ONNX STT integration is the recommended STT path for native W
 The shell now probes the desktop session for a real hotkey backend and shows that status in the control panel. On the tested Ubuntu 24.04 GNOME 46 Wayland machine, `org.freedesktop.portal.GlobalShortcuts` is not exposed by the active portal stack, so the shell currently runs in manual/tray push-to-talk fallback mode instead of pretending a real hold/release global shortcut exists.
 This repo now also includes a GNOME Shell extension backend in `linux/gnome_extension/`. On GNOME 46 it provides a practical **toggle** shortcut backend for the Qt shell over localhost IPC. It is GNOME-specific and should be treated as a separate adapter, not as a general Linux solution.
 
+On the current GNOME/Wayland development machine, the most reliable shell launch command is:
+
+```bash
+DOMOVIK_QT_PLATFORM=xcb LOG_LEVEL=3 python -m linux.qt_shell.app
+```
+
+This launch mode currently preserves the expected desktop text scaling and enables verbose shell logging in `linux/data/logs/qt-shell.log`.
+
+`LOG_LEVEL` for the Qt shell currently supports these levels:
+
+- `0`: silent
+- `1`: errors only
+- `2`: info and errors
+- `3`: debug, info, and errors
+
+If `LOG_LEVEL` is unset or invalid, the shell uses level `2`.
+Qt shell logs are written to `linux/data/logs/qt-shell.log`.
+
 ## Configuration
 
 The relevant variables are listed in `linux/.env.example`.
+
+Prompt templates for the runtime now live in:
+
+- `linux/prompts.json` for runtime/system prompt text
+- `SOUL.md` for assistant identity and personality
+
+The split is intentional:
+
+- edit `SOUL.md` when you want to change who Domovik is
+- edit `linux/prompts.json` when you want to change how the runtime frames text,
+  vision, agentic vision, or screenshot grounding behavior
 
 - `VISION_PROVIDER`: `anthropic` or `openai_compat`
 - `TEXT_PROVIDER`: `vision_provider` or `minimax`
 - `ANTHROPIC_API_KEY`: primary LLM with screenshot understanding when `VISION_PROVIDER=anthropic`
 - `ANTHROPIC_MODEL`: default `claude-sonnet-4-20250514`
-- `OPENAI_COMPAT_BASE_URL`: base URL of an OpenAI-compatible vision backend, for example your Cloudflare tunnel to Kaggle
-- `OPENAI_COMPAT_API_KEY`: API key for the OpenAI-compatible backend; often `EMPTY` for your own `vLLM`
-- `OPENAI_COMPAT_MODEL`: model name for the OpenAI-compatible backend
-- `OPENAI_COMPAT_CF_ACCESS_CLIENT_ID`, `OPENAI_COMPAT_CF_ACCESS_CLIENT_SECRET`: optional for Cloudflare Access-protected endpoints
+- `VISION_BASE_URL`: base URL of the screenshot-aware vision backend, for example your tunnel to Kaggle
+- `VISION_API_KEY`: API key for the vision backend; often `EMPTY` for your own `vLLM`
+- `VISION_MODEL`: model name for the vision backend
+- `VISION_MAX_IMAGES`: how many images that backend accepts per prompt. Use `1` for a strict single-image `vLLM` setup, or `2` if you want Domovik to send both full screenshot and ROI together
+- `TAVILY_API_KEY`: enables the built-in Tavily-backed `searchWeb` capability for web-search turns
+- `AGENTIC_MAX_CYCLES`: hard cap for bounded agentic cycles across runtime planner loops, default `3`
+- `AGENTIC_RUNTIME_SECONDS`: total runtime budget for one bounded agentic loop, default `15`
+- `VISUAL_AUGMENTATION_PROVIDERS`: reserved comma-separated hook list for future OCR/CV providers; empty keeps ordinary turns unchanged
+- `VISION_CF_ACCESS_CLIENT_ID`, `VISION_CF_ACCESS_CLIENT_SECRET`: optional for Cloudflare Access-protected vision endpoints
 - `MINIMAX_TEXT_BASE_URL`: default `https://api.minimax.io/v1`
 - `MINIMAX_TEXT_MODEL`: default `MiniMax-M2.7`
 - `TTS_PROVIDER`: `elevenlabs` or `minimax`
@@ -98,8 +132,112 @@ The runtime now routes text-only and screenshot-aware turns separately:
 
 - text-only turns can go to `TEXT_PROVIDER=minimax`
 - screenshot-aware turns go to `VISION_PROVIDER`
+- the runtime keeps an explicit per-turn routing mode:
+  - `text` for plain text-only turns
+  - `direct_vision` for screenshot-aware turns in the current slice
+  - `agentic_vision` for bounded screenshot re-check turns
 
 If a screenshot is attached but the configured vision backend is unavailable, the runtime returns a normal assistant reply that tells the user to switch to text-only mode instead of failing with a hard error.
+If text generation is configured through MiniMax and that backend is unavailable, the runtime returns an actionable text-backend failure reply instead of a transport-style crash.
+
+## Built-in Web Search
+
+The runtime now includes an internal search capability layer:
+
+- `performSearch(query, options)`
+- `searchWeb(query)`
+- `searchDocs(query)`
+- `searchLocal(query)`
+
+For the current slice, only `searchWeb(query)` is implemented. It uses Tavily behind the runtime boundary and can be triggered through the browser UI or Qt shell search toggle, or by an explicit prompt such as `search the web for ...`.
+
+Current search behaviour:
+
+- web search is additive and uses `/api/chat`
+- the runtime now uses a bounded search loop rather than a single fixed Tavily call
+- the planner may refine the query and search again before finalizing
+- the loop stops at the configured agentic cycle cap or runtime budget
+- the final answer stays plain semantic text
+- returned search metadata stays outside TTS/history-safe reply text
+- if Tavily is unavailable, the runtime returns an actionable failure reply instead of pretending the search succeeded
+
+## Deep Agents Migration Scaffold
+
+Domovik now includes a separate agent runtime boundary under:
+
+
+Current migration status:
+
+- fast path stays in `linux/server.js`
+- bounded web-search orchestration currently uses the built-in classic runtime
+- bounded vision re-check remains on the classic path for now
+
+This lets the project adopt Deep Agents incrementally instead of rewriting the whole runtime in one step.
+
+## Agentic Vision Re-check
+
+The current `003` slice now exposes an additive screenshot re-check path:
+
+- browser UI: `Agentic re-check`
+- Qt shell: `Use agentic re-check for screenshot turns`
+
+When that mode is enabled for a screenshot turn, the runtime:
+
+- keeps using the same captured screenshot
+- runs a bounded re-check loop
+- asks the vision backend focused follow-up inspection questions
+- lets the text backend decide whether to inspect again or finalize
+- stops after the configured agentic cycle cap or runtime budget and reports uncertainty explicitly if needed
+
+The runtime also exposes `POST /api/visual-session/clear` so screenshot state can be cleared independently from chat history.
+
+## ROI Support
+
+The first real manual ROI flow now ships in the browser UI:
+
+- capture or upload a screenshot
+- click `select roi`
+- drag over the preview
+- the runtime keeps both the full screenshot and the cropped ROI for the turn
+
+The current first slice is intentionally asymmetric:
+
+- browser UI: real manual ROI selection
+- Qt shell: ROI-ready session structure only, no manual crop UI yet
+
+ROI is additive context. It does not replace the full screenshot, and the runtime forwards both to screenshot-aware backends when ROI is present.
+
+## Semantic History And Display Replies
+
+Domovik now keeps three different pieces of turn state separate:
+
+- semantic conversation history for follow-up turns
+- display-only reply formatting such as timing banners and log-path hints
+- visual session state for the current screenshot context
+
+The important rule is:
+
+- `reply` is always plain semantic text
+- TTS always uses plain semantic text
+- UI timing banners and log hints live in display-only state and must not be fed back into history
+
+Clearing chat history does not clear the current screenshot. The browser UI and Qt shell now treat those as separate state buckets even before full visual-session controls land.
+
+## Mode And Reset Semantics
+
+Domovik now exposes the current interaction mode explicitly:
+
+- `text`: no active screenshot is being used for the turn
+- `direct_vision`: the current screenshot is sent directly to the configured vision backend
+- `agentic_vision`: the current screenshot stays fixed while the runtime performs a bounded re-check loop before finalizing
+
+History reset and screenshot reset are intentionally separate:
+
+- `clear chat history` removes semantic conversation memory but keeps the current screenshot context
+- `clear screenshot` or `clear visual session` removes the current screenshot and ROI state but keeps chat history
+- `clear roi` removes only the current ROI and keeps the full screenshot
+
+This split is intentional so users can retry a screenshot turn without losing the conversation, or clear the image context without wiping the conversation thread.
 
 ## Handoffs
 

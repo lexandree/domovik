@@ -39,7 +39,12 @@
               <button id="capture-screen" class="primary-button">capture screen</button>
               <label class="upload-button" for="image-upload">upload image</label>
               <input id="image-upload" type="file" accept="image/*" hidden />
-              <button id="clear-screen" class="ghost-button">clear screen</button>
+              <button id="clear-screen" class="ghost-button">clear screenshot</button>
+            </div>
+            <div class="controls">
+              <button id="start-roi" class="ghost-button">select roi</button>
+              <button id="clear-roi" class="ghost-button">clear roi</button>
+              <span id="roi-status" class="activity">no roi selected</span>
             </div>
             <div class="controls">
               <button id="start-recording" class="primary-button">start recording</button>
@@ -48,6 +53,8 @@
             <div class="toggle-row">
               <label><input id="use-conversation" type="checkbox" checked /> Include conversation history</label>
               <label><input id="speak-response" type="checkbox" checked /> Speak reply</label>
+              <label><input id="web-search" type="checkbox" /> Web search</label>
+              <label><input id="agentic-recheck" type="checkbox" /> Agentic re-check</label>
             </div>
             <div id="capture-preview" class="capture-preview empty">no screenshot selected</div>
             <div class="submit-row">
@@ -61,7 +68,7 @@
           <section class="panel">
             <div class="panel-header">
               <h2>Response</h2>
-              <button id="clear-history" class="ghost-button">clear history</button>
+              <button id="clear-history" class="ghost-button">clear chat history</button>
             </div>
             <pre id="response" class="response-box">no response yet</pre>
           </section>

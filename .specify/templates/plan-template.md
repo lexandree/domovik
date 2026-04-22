@@ -31,7 +31,18 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- Local-first check: confirm secrets, user state, and generated artifacts stay in
+  local/ignored paths and that any new remote dependency is justified.
+- Grounding check: confirm screenshot, ROI, OCR, or visual-session changes
+  preserve real captured context and define refusal/fallback behavior for
+  unreliable exact reading.
+- Boundary check: confirm whether work belongs in `linux/server.js`,
+  `linux/qt_shell/`, browser UI, or GNOME adapter, and justify any cross-layer
+  exception.
+- Orchestration check: confirm deterministic/low-latency paths stay primary and
+  any agentic or MCP layer is explicitly bounded, optional, and observable.
+- Validation check: list the concrete syntax checks, runtime checks, UI smoke
+  tests, or deferred verifications required by the touched paths.
 
 ## Project Structure
 

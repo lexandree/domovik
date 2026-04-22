@@ -110,3 +110,10 @@ When changing the Linux runtime materially, prefer this verification sequence:
 ## Self-Update
 
 When the Linux app structure changes materially, update this file.
+
+## Active Technologies
+- Node.js >=20 for runtime, browser JavaScript for web UI, Python 3.11+ for Qt shell + Node built-ins only in `linux/server.js`, PySide6 shell, existing MiniMax/OpenAI-compatible/Anthropic HTTP integrations, existing GNOME Shell extension adapter (003-agentic-vision-runtime)
+- local files only: `linux/.env`, `linux/data/`, `codex output/`, in-memory conversation and visual session state in runtime/UI (003-agentic-vision-runtime)
+
+## Recent Changes
+- 003-agentic-vision-runtime: Added Node.js >=20 for runtime, browser JavaScript for web UI, Python 3.11+ for Qt shell + Node built-ins only in `linux/server.js`, PySide6 shell, existing MiniMax/OpenAI-compatible/Anthropic HTTP integrations, existing GNOME Shell extension adapter

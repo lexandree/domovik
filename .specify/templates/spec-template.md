@@ -126,3 +126,15 @@
 - [Assumption about scope boundaries, e.g., "Mobile support is out of scope for v1"]
 - [Assumption about data/environment, e.g., "Existing authentication system will be reused"]
 - [Dependency on existing system/service, e.g., "Requires access to the existing user profile API"]
+
+## Constitution Alignment *(mandatory)*
+
+- **Local-First Impact**: [Explain how secrets, local state, logs, and any remote
+  backend assumptions remain compatible with the project’s local-first model]
+- **Grounding Impact**: [Explain how the feature preserves grounded screen/audio
+  context, refuses unreliable exact reading when needed, and separates semantic
+  context from display/debug metadata]
+- **Boundary Impact**: [State which layer owns the change: runtime, Qt shell,
+  browser UI, GNOME adapter, or docs/spec only]
+- **Validation Intent**: [State the minimum syntax/runtime/UI verification needed
+  for this feature, or explain why validation must be deferred]

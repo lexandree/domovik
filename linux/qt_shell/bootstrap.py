@@ -10,6 +10,9 @@ def configure_qt_environment() -> None:
     # platform theme plugin can crash against the local xsettings schema. Use a
     # lighter fallback theme layer for the shell and disable the GTK3 theme
     # plugin in the active environment if it exists.
+    requested_qt_platform = os.environ.get("DOMOVIK_QT_PLATFORM", "").strip()
+    if requested_qt_platform:
+        os.environ["QT_QPA_PLATFORM"] = requested_qt_platform
     os.environ.setdefault("QT_QPA_PLATFORMTHEME", "xdgdesktopportal")
     os.environ.setdefault("QT_STYLE_OVERRIDE", "Fusion")
     disable_problematic_qgtk3_plugin()

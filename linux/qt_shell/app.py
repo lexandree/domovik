@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import base64
+import json
 import re
 
 from .bootstrap import configure_qt_environment
@@ -17,11 +18,12 @@ from PySide6.QtWidgets import QApplication
 from .audio_capture import NativeAudioRecorder
 from .async_tasks import AsyncCall
 from .bridge import RuntimeBridge
-from .capture import capture_current_screen_as_data_url
+from .capture import capture_current_screen_as_data_url, has_gnome_screenshot
 from .hotkeys import apply_hotkey_shortcut, detect_hotkey_backend, resolve_active_hotkey_shortcut
 from .ipc_server import ShellIpcServer
 from .overlay import OverlayWindow
 from .panel import ControlPanelWindow
+from .roi_selector import RoiSelectionDialog
 from .runtime import RuntimeProcessController
 from .settings import load_shell_settings, save_shell_settings
 from .tray import TrayController
@@ -54,8 +56,20 @@ class ShellApplication:
             on_toggle=self.toggle_push_to_talk,
             on_show_panel=self.show_control_panel,
         )
-        self.conversation_history: list[dict] = []
-        self.latest_screenshot_data_url = ""
+        self.semantic_history: list[dict] = []
+        self.latest_display_reply_text = ""
+        self.visual_session_state = {
+            "session_id": "",
+            "full_image_data_url": "",
+            "capture_summary": "",
+            "rois": [],
+            "cv_hints": [],
+            "is_active": False,
+        }
+        self._capture_restore_visibility = {
+            "panel": False,
+            "overlay": False,
+        }
         self.overlay_window = OverlayWindow()
         self.control_panel_window = ControlPanelWindow(
             runtime_status_provider=self.get_runtime_status_summary,
@@ -65,6 +79,9 @@ class ShellApplication:
             on_start_runtime=self.start_runtime,
             on_stop_runtime=self.stop_runtime,
             on_capture_screen=self.capture_screen,
+            on_clear_screenshot=self.clear_screenshot,
+            on_select_roi=self.select_roi,
+            on_clear_roi=self.clear_roi,
             on_start_push_to_talk=self.start_push_to_talk,
             on_stop_push_to_talk=self.stop_push_to_talk,
             on_apply_push_to_talk_shortcut=self.apply_push_to_talk_shortcut,
@@ -78,6 +95,7 @@ class ShellApplication:
             initial_auto_speak_replies=self.shell_settings.auto_speak_replies,
             initial_push_to_talk_shortcut=self.shell_settings.push_to_talk_shortcut,
         )
+        self.control_panel_window.set_capture_available(False)
         self.control_panel_window.push_to_talk_auto_send_checkbox.toggled.connect(
             self.set_push_to_talk_auto_send
         )
@@ -162,29 +180,118 @@ class ShellApplication:
             details = runtime_status.details
             text_provider = details.get("textProvider", "unknown")
             vision_provider = details.get("visionProvider", "unknown")
+            active_mode = details.get("activeMode", "text")
             if text_provider == "minimax":
                 text_model_name = details.get("miniMaxTextModel", "unknown")
-                return ("online", f"MiniMax text: {text_model_name} · vision: {vision_provider}")
+                return ("online", f"mode: {active_mode} · MiniMax text: {text_model_name} · vision: {vision_provider}")
             if vision_provider == "openai_compat":
-                model_name = details.get("openAiCompatibleModel", "unknown")
-                return ("online", f"OpenAI-compatible model: {model_name}")
+                model_name = details.get("visionModel", "unknown")
+                return ("online", f"mode: {active_mode} · Vision model: {model_name}")
             model_name = details.get("anthropicModel", "unknown")
-            return ("online", f"Anthropic model: {model_name}")
+            return ("online", f"mode: {active_mode} · Anthropic model: {model_name}")
 
         error_text = runtime_status.details.get("error", "runtime offline")
         return ("offline", error_text)
 
     def capture_screen(self) -> None:
-        try:
-            capture_result = capture_current_screen_as_data_url()
-        except Exception as exc:
-            self.control_panel_window.set_capture_summary(f"capture failed: {exc}")
-            self.overlay_window.set_message("capture failed")
+        if self.turn_state in {"capturing", "transcribing", "thinking", "requesting_speech"}:
+            self.control_panel_window.set_capture_summary(f"{self.turn_state} · please wait")
             return
 
-        self.latest_screenshot_data_url = capture_result.data_url
-        self.control_panel_window.set_capture_summary(capture_result.summary)
-        self.overlay_window.set_message("screen captured")
+        session_type = (os.environ.get("XDG_SESSION_TYPE", "") or "").strip().lower()
+        desktop = (os.environ.get("XDG_CURRENT_DESKTOP", "") or "").strip().upper()
+        if session_type == "wayland" and "GNOME" in desktop and not has_gnome_screenshot():
+            message = "gnome-screenshot is not installed. Install it first for screen capture on GNOME Wayland."
+            self.control_panel_window.set_capture_summary(message)
+            self.control_panel_window.set_response_text(message)
+            self.overlay_window.set_message("capture unavailable")
+            return
+
+        self.turn_state = "capturing"
+        self._refresh_interaction_state()
+        self.control_panel_window.set_capture_summary("capturing screen…")
+        self.overlay_window.set_message("capturing")
+        self._capture_restore_visibility = {
+            "panel": self.control_panel_window.isVisible(),
+            "overlay": self.overlay_window.isVisible(),
+        }
+        self.control_panel_window.hide()
+        self.overlay_window.hide()
+        QTimer.singleShot(70, self._start_capture_async)
+
+    def _start_capture_async(self) -> None:
+        self._start_async_call(
+            capture_current_screen_as_data_url,
+            on_success=self._handle_capture_success,
+            on_error=self._handle_capture_error,
+        )
+
+    def select_roi(self) -> None:
+        if not self.visual_session_state["is_active"] or not self.visual_session_state["full_image_data_url"]:
+            capture_summary = self.control_panel_window.capture_value_label.toPlainText().strip()
+            if capture_summary and capture_summary != "none":
+                self.control_panel_window.set_response_text(
+                    f"No active screenshot is available for ROI selection.\n\nLast capture state: {capture_summary}"
+                )
+            else:
+                self.control_panel_window.set_response_text("Capture a screen first.")
+            return
+
+        self.overlay_window.hide()
+        dialog = RoiSelectionDialog(self.visual_session_state["full_image_data_url"], self.control_panel_window)
+        if dialog.exec():
+            selection_result = dialog.get_selection_result()
+            if selection_result:
+                self.visual_session_state["rois"] = [
+                    {
+                        "roiId": "qt-roi-1",
+                        "label": "manual roi",
+                        "origin": "manual",
+                        "x": selection_result.x,
+                        "y": selection_result.y,
+                        "width": selection_result.width,
+                        "height": selection_result.height,
+                        "imageDataUrl": selection_result.image_data_url,
+                    }
+                ]
+                self._save_latest_roi_debug_artifacts(selection_result)
+                self.control_panel_window.set_capture_summary(
+                    f"{self.visual_session_state['capture_summary']} · roi {selection_result.width}x{selection_result.height}"
+                )
+                self.overlay_window.set_message("roi selected")
+        if self.shell_settings.overlay_visible:
+            self.show_overlay()
+
+    def clear_roi(self) -> None:
+        self.visual_session_state["rois"] = []
+        if self.visual_session_state["is_active"]:
+            self.control_panel_window.set_capture_summary(self.visual_session_state["capture_summary"])
+            self.overlay_window.set_message("roi cleared")
+
+    def clear_screenshot(self) -> None:
+        self.visual_session_state = {
+            "session_id": "",
+            "full_image_data_url": "",
+            "capture_summary": "",
+            "rois": [],
+            "cv_hints": [],
+            "is_active": False,
+        }
+        self.control_panel_window.set_capture_available(False)
+        self.control_panel_window.set_capture_summary("none")
+        self._refresh_interaction_state()
+
+        try:
+            self.runtime_bridge.clear_visual_session()
+        except Exception as exc:
+            self.control_panel_window.set_response_text(
+                f"Screenshot cleared locally, but runtime visual session clear failed:\n\n{exc}"
+            )
+            self.overlay_window.set_message("screenshot cleared locally")
+            return
+
+        self.control_panel_window.set_response_text("Screenshot context cleared. Conversation history kept.")
+        self.overlay_window.set_message("screenshot cleared")
 
     def start_push_to_talk(self) -> None:
         if self.turn_state in {"transcribing", "thinking", "requesting_speech"}:
@@ -258,8 +365,23 @@ class ShellApplication:
         self._start_async_call(
             self.runtime_bridge.ask_chat,
             prompt_text,
-            self.latest_screenshot_data_url,
-            self.conversation_history[-10:],
+            self.visual_session_state["full_image_data_url"],
+            self.semantic_history[-10:],
+            (
+                "agentic_vision"
+                if (
+                    self.visual_session_state["is_active"] and
+                    self.control_panel_window.should_use_agentic_recheck()
+                )
+                else (
+                    "direct_vision"
+                    if self.visual_session_state["is_active"]
+                    else "text"
+                )
+            ),
+            self.visual_session_state["is_active"] and self.control_panel_window.should_use_agentic_recheck(),
+            self.visual_session_state["rois"],
+            {"mode": "web"} if self.control_panel_window.should_use_web_search() else None,
             on_success=lambda payload: self._handle_chat_success(prompt_text, payload),
             on_error=self._handle_chat_error,
         )
@@ -292,8 +414,13 @@ class ShellApplication:
         self._refresh_interaction_state()
 
     def clear_conversation_history(self) -> None:
-        self.conversation_history = []
-        self.control_panel_window.set_response_text("conversation history cleared")
+        self.semantic_history = []
+        response_text = (
+            "Conversation history cleared. Current screenshot kept."
+            if self.visual_session_state["is_active"]
+            else "Conversation history cleared."
+        )
+        self.control_panel_window.set_response_text(response_text)
         self.overlay_window.set_message("history cleared")
 
     def refresh_runtime_status(self) -> None:
@@ -306,18 +433,33 @@ class ShellApplication:
             self.overlay_window.set_message(f"{self.assistant_name} ready")
             text_provider = runtime_details.get("textProvider", "unknown")
             vision_provider = runtime_details.get("visionProvider", "unknown")
+            active_mode = runtime_details.get("activeMode", "text")
+            routing_state = runtime_details.get("backendRoutingState", {})
             if text_provider == "minimax":
-                model_name = runtime_details.get("miniMaxTextModel", "unknown")
-            else:
-                model_name = (
-                    runtime_details.get("openAiCompatibleModel", "unknown")
-                    if vision_provider == "openai_compat"
-                    else runtime_details.get("anthropicModel", "unknown")
+                text_backend_summary = (
+                    f"{runtime_details.get('miniMaxTextModel', 'unknown')} · "
+                    f"{'available' if routing_state.get('textBackendAvailable') else 'unavailable'}"
                 )
+            else:
+                text_backend_summary = (
+                    f"shared with vision · "
+                    f"{'available' if routing_state.get('textBackendAvailable') else 'unavailable'}"
+                )
+            vision_backend_summary = (
+                f"{runtime_details.get('visionModel', 'unknown')}"
+                if vision_provider == "openai_compat"
+                else f"{runtime_details.get('anthropicModel', 'unknown')}"
+            )
+            vision_backend_summary = (
+                f"{vision_backend_summary} · "
+                f"{'available' if routing_state.get('visionBackendAvailable') else 'unavailable'}"
+            )
             detail_summary = (
                 f"text={text_provider} · "
                 f"vision={vision_provider} · "
-                f"model={model_name} · "
+                f"visual_session={'present' if runtime_details.get('visualSessionActive') else 'empty'} · "
+                f"rois={runtime_details.get('visualSessionRoiCount', 0)} · "
+                f"search={self._format_last_search_summary(runtime_details.get('lastSearch'))} · "
                 f"stt={runtime_details.get('speechToTextProvider', 'unknown')} · "
                 f"port={runtime_details.get('port', 'unknown')}"
             )
@@ -328,6 +470,9 @@ class ShellApplication:
             self.overlay_window.set_message("runtime offline")
             detail_summary = runtime_status.details.get("error", "runtime offline")
             status_summary = "offline"
+            text_backend_summary = "unknown"
+            vision_backend_summary = "unknown"
+            active_mode = "text"
 
         runtime_process_state = self.runtime_process_controller.get_state()
         if runtime_process_state.is_running:
@@ -342,6 +487,9 @@ class ShellApplication:
             runtime_summary=status_summary,
             runtime_details=detail_summary,
             runtime_process_summary=runtime_process_summary,
+            text_backend_summary=text_backend_summary,
+            vision_backend_summary=vision_backend_summary,
+            routing_mode_summary=active_mode,
         )
         active_shortcut = resolve_active_hotkey_shortcut(self.shell_settings.push_to_talk_shortcut)
         if active_shortcut != self.shell_settings.push_to_talk_shortcut:
@@ -384,6 +532,15 @@ class ShellApplication:
             return f"{value / 1000:.2f}s"
         return f"{int(round(value))}ms"
 
+    def _format_last_search_summary(self, search_payload: object) -> str:
+        if not isinstance(search_payload, dict) or not search_payload.get("used"):
+            return "none"
+        mode = str(search_payload.get("mode", "web"))
+        provider = str(search_payload.get("provider", "unknown"))
+        result_count = search_payload.get("resultCount", 0)
+        step_count = search_payload.get("stepCount", 0)
+        return f"{mode}/{provider}/{step_count}/{result_count}"
+
     def _build_push_to_talk_status(self, recorder_status) -> str:
         if not recorder_status.available:
             return "native capture unavailable"
@@ -397,6 +554,63 @@ class ShellApplication:
 
     def _shell_data_root(self):
         return Path(__file__).resolve().parents[1] / "data"
+
+    def _save_latest_capture_debug_artifacts(self, capture_result) -> None:
+        try:
+            data_root = self._shell_data_root()
+            debug_dir = data_root / "vision-debug" / "latest"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+
+            image_path = debug_dir / "qt-capture.jpg"
+            data_url = str(capture_result.data_url or "")
+            match = re.match(r"^data:([^;]+);base64,(.+)$", data_url)
+            if not match:
+                return
+
+            image_path.write_bytes(base64.b64decode(match.group(2)))
+
+            meta = {
+                "source": "qt-shell-capture",
+                "summary": capture_result.summary,
+                "width": capture_result.width,
+                "height": capture_result.height,
+                "file": str(image_path),
+            }
+            (debug_dir / "qt-capture.json").write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            return
+
+    def _save_latest_roi_debug_artifacts(self, selection_result) -> None:
+        try:
+            data_root = self._shell_data_root()
+            debug_dir = data_root / "vision-debug" / "latest"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+
+            image_path = debug_dir / "qt-roi.jpg"
+            data_url = str(selection_result.image_data_url or "")
+            match = re.match(r"^data:([^;]+);base64,(.+)$", data_url)
+            if not match:
+                return
+
+            image_path.write_bytes(base64.b64decode(match.group(2)))
+
+            meta = {
+                "source": "qt-shell-roi",
+                "x": selection_result.x,
+                "y": selection_result.y,
+                "width": selection_result.width,
+                "height": selection_result.height,
+                "file": str(image_path),
+            }
+            (debug_dir / "qt-roi.json").write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            return
 
     def shutdown(self) -> None:
         self.ipc_server.stop()
@@ -421,6 +635,39 @@ class ShellApplication:
         if self.control_panel_window.should_auto_send_transcript():
             self.ask_runtime()
 
+    def _handle_capture_success(self, capture_result) -> None:
+        self.visual_session_state = {
+            "session_id": f"qt-capture-{os.getpid()}-{len(self.semantic_history)}",
+            "full_image_data_url": capture_result.data_url,
+            "capture_summary": capture_result.summary,
+            "rois": [],
+            "cv_hints": [],
+            "is_active": True,
+        }
+        self._save_latest_capture_debug_artifacts(capture_result)
+        self.control_panel_window.set_capture_available(True)
+        self.control_panel_window.set_capture_summary(capture_result.summary)
+        self.turn_state = "idle"
+        self._refresh_interaction_state()
+        self._restore_shell_windows_after_capture()
+        self.overlay_window.set_message("screen captured")
+
+    def _handle_capture_error(self, error_text: str) -> None:
+        self.visual_session_state = {
+            "session_id": "",
+            "full_image_data_url": "",
+            "capture_summary": "",
+            "rois": [],
+            "cv_hints": [],
+            "is_active": False,
+        }
+        self.control_panel_window.set_capture_available(False)
+        self.control_panel_window.set_capture_summary(f"capture failed: {error_text}")
+        self.turn_state = "idle"
+        self._refresh_interaction_state()
+        self._restore_shell_windows_after_capture()
+        self.overlay_window.set_message("capture failed")
+
     def _handle_transcription_error(self, error_text: str) -> None:
         self.control_panel_window.set_push_to_talk_summary(f"transcription failed: {error_text}", False)
         self.control_panel_window.set_response_text(error_text)
@@ -430,19 +677,26 @@ class ShellApplication:
 
     def _handle_chat_success(self, prompt_text: str, response_payload: dict) -> None:
         plain_reply_text = str(response_payload.get("reply", "")).strip() or "No reply returned."
+        display_payload = response_payload.get("display")
+        debug_payload = response_payload.get("debug")
+        response_mode = str(response_payload.get("mode", "")).strip()
         self.latest_reply_text = plain_reply_text
-        response_text = plain_reply_text
-        timing_summary = self._format_timing_summary(response_payload.get("timings"))
-        if timing_summary:
-            response_text = f"{response_text}\n\n[{timing_summary}]"
-        self.control_panel_window.set_response_text(response_text)
+        self.latest_display_reply_text = self._build_display_reply_text(
+            plain_reply_text,
+            display_payload,
+            response_payload.get("timings"),
+            debug_payload,
+        )
+        self.control_panel_window.set_response_text(self.latest_display_reply_text)
         self.overlay_window.set_message(plain_reply_text)
-        self.conversation_history.append({"user": prompt_text, "assistant": plain_reply_text})
-        self.conversation_history = self.conversation_history[-10:]
+        if response_mode not in {"local_identity", "vision_roi_required", "search_unavailable"}:
+            self.semantic_history.append({"user": prompt_text, "assistant": plain_reply_text})
+            self.semantic_history = self.semantic_history[-10:]
         self.turn_state = "idle"
         self._refresh_interaction_state()
         if self.control_panel_window.should_auto_speak_replies():
             self.speak_response()
+        self.refresh_runtime_status()
 
     def _handle_chat_error(self, error_text: str) -> None:
         self.control_panel_window.set_response_text(error_text)
@@ -475,10 +729,68 @@ class ShellApplication:
 
     def _refresh_interaction_state(self) -> None:
         self.control_panel_window.set_interaction_state(
-            is_busy_turn=self.turn_state in {"transcribing", "thinking", "requesting_speech"},
+            is_busy_turn=self.turn_state in {"capturing", "transcribing", "thinking", "requesting_speech"},
             is_recording=self.audio_recorder.is_recording(),
             is_speaking=self.speech_player.is_playing(),
         )
+
+    def _restore_shell_windows_after_capture(self) -> None:
+        if self._capture_restore_visibility.get("panel"):
+            self.show_control_panel()
+        if self._capture_restore_visibility.get("overlay") and self.shell_settings.overlay_visible:
+            self.show_overlay()
+
+    def _build_display_reply_text(
+        self,
+        plain_reply_text: str,
+        display_payload: object,
+        timings: object,
+        debug_payload: object = None,
+    ) -> str:
+        if isinstance(display_payload, dict):
+            display_text = str(display_payload.get("displayText", "")).strip()
+            if display_text:
+                if isinstance(debug_payload, dict):
+                    debug_line = self._format_debug_payload(debug_payload)
+                    if debug_line:
+                        return f"{display_text}\n\n[debug: {debug_line}]"
+                return display_text
+
+        timing_summary = self._format_timing_summary(timings)
+        response_text = plain_reply_text
+        if timing_summary:
+            response_text = f"{response_text}\n\n[{timing_summary}]"
+        if isinstance(debug_payload, dict):
+            debug_line = self._format_debug_payload(debug_payload)
+            if debug_line:
+                response_text = f"{response_text}\n\n[debug: {debug_line}]"
+        return response_text
+
+    def _format_debug_payload(self, debug_payload: dict) -> str:
+        parts: list[str] = []
+        if "screenshotPresent" in debug_payload:
+            parts.append(f"screenshot={debug_payload.get('screenshotPresent')}")
+        if "screenshotLength" in debug_payload:
+            parts.append(f"len={debug_payload.get('screenshotLength')}")
+        if "modeHint" in debug_payload:
+            parts.append(f"hint={debug_payload.get('modeHint')}")
+        if "resolvedMode" in debug_payload:
+            parts.append(f"mode={debug_payload.get('resolvedMode')}")
+        if "roiCount" in debug_payload:
+            parts.append(f"rois={debug_payload.get('roiCount')}")
+        if "searchMode" in debug_payload and debug_payload.get("searchMode"):
+            parts.append(f"search={debug_payload.get('searchMode')}")
+        if "searchSteps" in debug_payload:
+            parts.append(f"search_steps={debug_payload.get('searchSteps')}")
+        if "searchResultCount" in debug_payload:
+            parts.append(f"search_results={debug_payload.get('searchResultCount')}")
+        if "searchFinalQuery" in debug_payload and debug_payload.get("searchFinalQuery"):
+            parts.append(f"query={debug_payload.get('searchFinalQuery')}")
+        if "searchDebugPath" in debug_payload:
+            parts.append(f"search_log={debug_payload.get('searchDebugPath')}")
+        if "visionDebugDirectory" in debug_payload:
+            parts.append(f"saved={debug_payload.get('visionDebugDirectory')}")
+        return " · ".join(parts)
 
     def run(self) -> int:
         self.tray_controller.show()

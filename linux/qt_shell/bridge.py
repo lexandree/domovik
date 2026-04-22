@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from urllib import request, error
 import base64
 import json
+import os
 from pathlib import Path
 
 
@@ -16,6 +17,16 @@ class RuntimeStatus:
 class RuntimeBridge:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
+        self.chat_timeout_seconds = self._read_chat_timeout_seconds()
+
+    def _read_chat_timeout_seconds(self) -> int:
+        raw_value = os.environ.get("DOMOVIK_CHAT_TIMEOUT_SECONDS", "").strip()
+        if not raw_value:
+            return 120
+        try:
+            return max(10, int(raw_value))
+        except ValueError:
+            return 120
 
     def get_status(self) -> RuntimeStatus:
         status_url = f"{self.base_url}/api/status"
@@ -34,12 +45,20 @@ class RuntimeBridge:
         prompt: str,
         screenshot_data_url: str = "",
         conversation_history: list[dict] | None = None,
+        mode_hint: str = "text",
+        agentic_recheck: bool = False,
+        roi_selections: list[dict] | None = None,
+        search: dict | None = None,
     ) -> dict:
         chat_url = f"{self.base_url}/api/chat"
         request_payload = {
             "prompt": prompt,
             "screenshotDataUrl": screenshot_data_url,
             "conversationHistory": conversation_history or [],
+            "modeHint": mode_hint,
+            "agenticRecheck": agentic_recheck,
+            "roiSelections": roi_selections or [],
+            "search": search,
         }
 
         try:
@@ -50,7 +69,29 @@ class RuntimeBridge:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with request.urlopen(chat_request, timeout=90) as response:
+            with request.urlopen(chat_request, timeout=self.chat_timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            response_text = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Runtime HTTP error {exc.code}: {response_text}") from exc
+        except error.URLError as exc:
+            raise RuntimeError(f"Runtime connection failed: {exc}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Runtime request failed: {exc}") from exc
+
+        return payload
+
+    def clear_visual_session(self) -> dict:
+        clear_url = f"{self.base_url}/api/visual-session/clear"
+        try:
+            request_body = json.dumps({}).encode("utf-8")
+            clear_request = request.Request(
+                clear_url,
+                data=request_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with request.urlopen(clear_request, timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
             response_text = exc.read().decode("utf-8", errors="replace")

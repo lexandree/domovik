@@ -100,6 +100,7 @@ The Linux port deliberately does not try to keep the Windows WinForms shell aliv
 - `linux/server.js` hosts the local HTTP server and API routes
 - `linux/public/` contains the browser UI
 - `linux/.env` holds your local configuration
+- `linux/prompts.json` holds runtime/system prompt templates
 - `SOUL.md` defines the assistant personality prompt
 - `codex output/` stores handoff logs and optional screenshot attachments
 

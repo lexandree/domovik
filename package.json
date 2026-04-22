@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node linux/server.js",
     "start:linux": "node linux/server.js",
-    "test:triggers": "node linux/tests/trigger-normalization.test.js"
+    "test:triggers": "node linux/tests/trigger-normalization.test.js",
+    "test:visual-context": "node linux/tests/visual-context-guard.test.js"
   },
   "engines": {
     "node": ">=20"

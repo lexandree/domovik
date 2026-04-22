@@ -10,3 +10,10 @@ __pycache__/
 *.pyc
 clicky-upstream/
 zippy-windows/
+node_modules/
+
+# Local personal notes
+specs/architecture/js-learning-path.md
+notes.local.md
+thoughts.local.md
+scratch.local.md
